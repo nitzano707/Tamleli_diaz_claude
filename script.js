@@ -888,3 +888,49 @@ function restartProcess() {
 
 }
 
+
+
+
+async function startDiarization() {
+    try {
+        // הצגת מודאל טעינה
+        document.getElementById('segmentationResult').textContent = 'מעבד את הקובץ...';
+        openModal('speakerSegmentationModal');
+
+        // קריאה לפונקציית נטליפי
+        const response = await fetch('/.netlify/functions/diarize', {
+            method: 'POST',
+            body: JSON.stringify({
+                audioData: audioBuffer, // המשתנה שמכיל את הקובץ
+                fileName: audioFileName
+            })
+        });
+
+        const data = await response.json();
+        
+        if (!response.ok) {
+            throw new Error(data.error || 'שגיאה בתהליך זיהוי הדוברים');
+        }
+
+        // עדכון ממשק המשתמש עם תוצאות הדיאריזציה
+        displayDiarizationResults(data);
+
+    } catch (error) {
+        console.error('Error:', error);
+        document.getElementById('segmentationResult').textContent = 
+            'אירעה שגיאה בתהליך זיהוי הדוברים: ' + error.message;
+    }
+}
+
+function displayDiarizationResults(data) {
+    const resultElement = document.getElementById('segmentationResult');
+    let formattedResults = '';
+
+    data.diarization.forEach((segment, index) => {
+        const startTime = formatTime(segment.start);
+        const endTime = formatTime(segment.end);
+        formattedResults += `[${startTime} - ${endTime}] דובר ${segment.speaker}\n${segment.text}\n\n`;
+    });
+
+    resultElement.textContent = formattedResults;
+}
