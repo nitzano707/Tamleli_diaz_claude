@@ -898,27 +898,28 @@ async function startDiarization() {
             throw new Error('לא נבחר קובץ אודיו');
         }
 
-        document.getElementById('segmentationResult').textContent = 'מעבד את הקובץ... תהליך זה עשוי להימשך מספר דקות';
+        console.log('Starting diarization for file:', audioFile.name);
+        document.getElementById('segmentationResult').textContent = 'מתחיל תהליך... מעבד את הקובץ';
         openModal('speakerSegmentationModal');
 
         // המרת הקובץ ל-base64
+        console.log('Converting file to base64...');
         const reader = new FileReader();
         const audioData = await new Promise((resolve, reject) => {
             reader.onload = () => {
                 const base64 = reader.result.split(',')[1];
+                console.log('File converted successfully');
                 resolve(base64);
             };
-            reader.onerror = reject;
+            reader.onerror = (error) => {
+                console.error('File reading error:', error);
+                reject(error);
+            };
             reader.readAsDataURL(audioFile);
         });
 
-        // קביעת ה-URL המוחלט
-        const currentUrl = window.location.origin;
-        const functionUrl = `${currentUrl}/.netlify/functions/diarize`;
-        
-        console.log('Calling function at:', functionUrl); // לוג לבדיקה
-
-        const response = await fetch(functionUrl, {
+        console.log('Sending request to serverless function...');
+        const response = await fetch('/.netlify/functions/diarize', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json'
@@ -929,19 +930,31 @@ async function startDiarization() {
             })
         });
 
-        if (!response.ok) {
-            const errorText = await response.text();
-            console.error('Server response:', errorText); // לוג לבדיקה
-            throw new Error(`Server error: ${response.status} - ${errorText}`);
+        // קריאת התשובה כטקסט קודם
+        const responseText = await response.text();
+        console.log('Raw server response:', responseText);
+
+        // ניסיון לפרסר את התשובה כ-JSON
+        let data;
+        try {
+            data = JSON.parse(responseText);
+        } catch (e) {
+            console.error('Failed to parse server response as JSON:', e);
+            throw new Error('תשובה לא תקינה מהשרת');
         }
 
-        const data = await response.json();
-        
+        if (!response.ok) {
+            throw new Error(`שגיאת שרת: ${data.error || 'שגיאה לא ידועה'}`);
+        }
+
+        // עדכון המשתמש
         document.getElementById('segmentationResult').textContent = 
-            'הקובץ נשלח בהצלחה לעיבוד. התוצאות יוצגו כאן כשהן יהיו מוכנות. תהליך זה עשוי להימשך מספר דקות.';
+            'בקשה נשלחה בהצלחה. ממתין לתוצאות...\n' +
+            'מזהה עבודה: ' + (data.jobId || 'לא התקבל') + '\n' +
+            'סטטוס: ' + (data.status || 'לא ידוע');
 
     } catch (error) {
-        console.error('Error:', error);
+        console.error('Diarization error:', error);
         document.getElementById('segmentationResult').textContent = 
             'אירעה שגיאה בתהליך זיהוי הדוברים: ' + error.message;
     }
