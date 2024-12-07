@@ -12,27 +12,29 @@ exports.handler = async (event, context) => {
   try {
     const { audioData, fileName } = JSON.parse(event.body);
 
-    // יצירת URL מוחלט עבור PyannoteAI
-    const PYANNOTE_API_URL = 'https://api.pyannote.ai';
-    
+    // יצירת media-id ייחודי
+    const mediaId = `media://${Date.now()}-${fileName.replace(/[^a-zA-Z0-9]/g, '_')}`;
+
     // צעד 1: יצירת media URL
-    const mediaResponse = await fetch(`${PYANNOTE_API_URL}/v1/media/input`, {
+    const mediaResponse = await fetch('https://api.pyannote.ai/v1/media/input', {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${process.env.PYANNOTE_API_KEY}`,
         'Content-Type': 'application/json'
       },
       body: JSON.stringify({
-        url: `media://${fileName}`
+        url: mediaId  // שימוש במזהה בפורמט הנכון
       })
     });
 
     if (!mediaResponse.ok) {
       const error = await mediaResponse.text();
+      console.error('Media response error:', error);
       throw new Error(`PyannoteAI media error: ${error}`);
     }
 
     const mediaData = await mediaResponse.json();
+    console.log('Media response:', mediaData);
     
     // צעד 2: העלאת הקובץ
     const buffer = Buffer.from(audioData, 'base64');
@@ -45,24 +47,28 @@ exports.handler = async (event, context) => {
     });
 
     if (!uploadResponse.ok) {
-      throw new Error(`Upload error: ${await uploadResponse.text()}`);
+      const uploadError = await uploadResponse.text();
+      console.error('Upload error:', uploadError);
+      throw new Error(`Upload error: ${uploadError}`);
     }
 
     // צעד 3: יצירת משימת דיאריזציה
-    const diarizeResponse = await fetch(`${PYANNOTE_API_URL}/v1/diarize`, {
+    const diarizeResponse = await fetch('https://api.pyannote.ai/v1/diarize', {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${process.env.PYANNOTE_API_KEY}`,
         'Content-Type': 'application/json'
       },
       body: JSON.stringify({
-        url: `media://${fileName}`,
+        url: mediaId,  // שימוש באותו מזהה
         webhook: process.env.WEBHOOK_URL
       })
     });
 
     if (!diarizeResponse.ok) {
-      throw new Error(`Diarization error: ${await diarizeResponse.text()}`);
+      const diarizeError = await diarizeResponse.text();
+      console.error('Diarize error:', diarizeError);
+      throw new Error(`Diarization error: ${diarizeError}`);
     }
 
     const diarizeData = await diarizeResponse.json();
