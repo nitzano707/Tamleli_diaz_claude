@@ -893,14 +893,32 @@ function restartProcess() {
 
 async function startDiarization() {
     try {
+        // קבלת קובץ האודיו הנוכחי
+        const audioFile = document.getElementById('audioFile').files[0];
+        if (!audioFile) {
+            throw new Error('לא נבחר קובץ אודיו');
+        }
+
         document.getElementById('segmentationResult').textContent = 'מעבד את הקובץ... תהליך זה עשוי להימשך מספר דקות';
         openModal('speakerSegmentationModal');
+
+        // המרת הקובץ ל-base64
+        const reader = new FileReader();
+        const audioData = await new Promise((resolve, reject) => {
+            reader.onload = () => {
+                // המרה ל-base64 והסרת ה-metadata
+                const base64 = reader.result.split(',')[1];
+                resolve(base64);
+            };
+            reader.onerror = reject;
+            reader.readAsDataURL(audioFile);
+        });
 
         const response = await fetch('/.netlify/functions/diarize', {
             method: 'POST',
             body: JSON.stringify({
-                audioData: audioBuffer,
-                fileName: audioFileName
+                audioData: audioData,
+                fileName: audioFile.name
             })
         });
 
@@ -910,7 +928,6 @@ async function startDiarization() {
             throw new Error(data.error || 'שגיאה בתהליך זיהוי הדוברים');
         }
 
-        // נציג למשתמש הודעה שהקובץ נשלח והתוצאות יגיעו בקרוב
         document.getElementById('segmentationResult').textContent = 
             'הקובץ נשלח בהצלחה לעיבוד. התוצאות יוצגו כאן כשהן יהיו מוכנות. תהליך זה עשוי להימשך מספר דקות.';
 
@@ -920,6 +937,7 @@ async function startDiarization() {
             'אירעה שגיאה בתהליך זיהוי הדוברים: ' + error.message;
     }
 }
+
 
 
 function displayDiarizationResults(data) {
