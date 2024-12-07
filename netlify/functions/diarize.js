@@ -12,79 +12,48 @@ exports.handler = async (event, context) => {
   try {
     const { audioData, fileName } = JSON.parse(event.body);
 
-    // יצירת media-id ייחודי
-    const mediaId = `media://${Date.now()}-${fileName.replace(/[^a-zA-Z0-9]/g, '_')}`;
+    // שימוש בשם קובץ מנוקה למזהה הקובץ
+    const cleanFileName = fileName.replace(/[^a-zA-Z0-9]/g, '');
+    const mediaUrl = `media://${cleanFileName}`;
 
-    // צעד 1: יצירת media URL
+    console.log('Attempting to create media URL:', mediaUrl);
+
+    // יצירת Media URL
     const mediaResponse = await fetch('https://api.pyannote.ai/v1/media/input', {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${process.env.PYANNOTE_API_KEY}`,
         'Content-Type': 'application/json'
       },
-      body: JSON.stringify({
-        url: mediaId  // שימוש במזהה בפורמט הנכון
-      })
+      body: JSON.stringify({ url: mediaUrl })
     });
 
     if (!mediaResponse.ok) {
-      const error = await mediaResponse.text();
-      console.error('Media response error:', error);
-      throw new Error(`PyannoteAI media error: ${error}`);
+      const errorText = await mediaResponse.text();
+      console.error('Media creation error:', errorText);
+      throw new Error(errorText);
     }
 
     const mediaData = await mediaResponse.json();
-    console.log('Media response:', mediaData);
-    
-    // צעד 2: העלאת הקובץ
-    const buffer = Buffer.from(audioData, 'base64');
-    const formData = new FormData();
-    formData.append('file', buffer, fileName);
+    console.log('Media URL created successfully:', mediaData);
 
-    const uploadResponse = await fetch(mediaData.url, {
-      method: 'PUT',
-      body: formData
-    });
-
-    if (!uploadResponse.ok) {
-      const uploadError = await uploadResponse.text();
-      console.error('Upload error:', uploadError);
-      throw new Error(`Upload error: ${uploadError}`);
-    }
-
-    // צעד 3: יצירת משימת דיאריזציה
-    const diarizeResponse = await fetch('https://api.pyannote.ai/v1/diarize', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${process.env.PYANNOTE_API_KEY}`,
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        url: mediaId,  // שימוש באותו מזהה
-        webhook: process.env.WEBHOOK_URL
-      })
-    });
-
-    if (!diarizeResponse.ok) {
-      const diarizeError = await diarizeResponse.text();
-      console.error('Diarize error:', diarizeError);
-      throw new Error(`Diarization error: ${diarizeError}`);
-    }
-
-    const diarizeData = await diarizeResponse.json();
-
+    // שלב זה בינתיים מוחזר בהצלחה - נוסיף את השאר בהמשך
     return {
       statusCode: 200,
-      headers: {
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify(diarizeData)
+      body: JSON.stringify({
+        status: 'media_url_created',
+        mediaUrl: mediaUrl
+      })
     };
+
   } catch (error) {
     console.error('Function error:', error);
     return {
       statusCode: 500,
-      body: JSON.stringify({ error: error.message })
+      body: JSON.stringify({ 
+        error: error.message,
+        details: 'Check function logs for more information'
+      })
     };
   }
 };
