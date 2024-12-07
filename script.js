@@ -892,28 +892,42 @@ function restartProcess() {
 
 
 // התחלת תהליך זיהוי הדוברים
+// פונקציית התחלת התהליך
 async function startDiarization() {
     try {
+        // בדיקות תקינות התחלתיות
         const audioFile = document.getElementById('audioFile').files[0];
         if (!audioFile) {
             throw new Error('לא נבחר קובץ אודיו');
         }
 
-        document.getElementById('segmentationResult').textContent = 'מעבד את הקובץ... התהליך עשוי להימשך מספר דקות';
+        // בדיקת סוג הקובץ
+        if (!audioFile.type.includes('audio') && !audioFile.name.toLowerCase().endsWith('.mp3')) {
+            throw new Error('פורמט קובץ לא נתמך. אנא השתמש בקובץ MP3');
+        }
+
+        // עדכון ממשק המשתמש
+        document.getElementById('segmentationResult').textContent = 
+            'מעבד את הקובץ... תהליך זה עשוי להימשך מספר דקות';
         openModal('speakerSegmentationModal');
 
-        // המרת הקובץ ל-base64
+        // המרת הקובץ לbase64
+        console.log('Converting audio file to base64...');
         const reader = new FileReader();
         const audioData = await new Promise((resolve, reject) => {
             reader.onload = () => {
-                const base64 = reader.result.split(',')[1];
-                resolve(base64);
+                try {
+                    const base64 = reader.result.split(',')[1];
+                    resolve(base64);
+                } catch (error) {
+                    reject(new Error('שגיאה בהמרת הקובץ: ' + error.message));
+                }
             };
-            reader.onerror = reject;
+            reader.onerror = () => reject(new Error('שגיאה בקריאת הקובץ'));
             reader.readAsDataURL(audioFile);
         });
 
-        // שליחה לפונקציית Netlify
+        console.log('Sending request to serverless function...');
         const response = await fetch('/.netlify/functions/diarize', {
             method: 'POST',
             headers: {
@@ -921,38 +935,62 @@ async function startDiarization() {
             },
             body: JSON.stringify({
                 audioData: audioData,
-                fileName: audioFile.name
+                fileName: audioFile.name,
+                fileSize: audioFile.size
             })
         });
 
-        const data = await response.json();
-        
+        // קריאת התגובה מהשרת
+        let data;
+        try {
+            const text = await response.text();
+            data = JSON.parse(text);
+        } catch (error) {
+            console.error('Raw server response:', text);
+            throw new Error('שגיאה בפענוח תגובת השרת');
+        }
+
         if (!response.ok) {
             throw new Error(data.error || 'שגיאה בתהליך זיהוי הדוברים');
         }
 
+        // עדכון המשתמש
         document.getElementById('segmentationResult').textContent = 
             'הקובץ נשלח בהצלחה לעיבוד. התוצאות יוצגו כאן כשהן יהיו מוכנות.\n' +
             'מזהה עבודה: ' + data.jobId;
 
-        // התחלת בדיקת סטטוס תקופתית
+        // התחלת בדיקת סטטוס
         startStatusCheck(data.jobId);
 
     } catch (error) {
-        console.error('Error:', error);
+        console.error('Diarization error:', error);
         document.getElementById('segmentationResult').textContent = 
             'אירעה שגיאה בתהליך זיהוי הדוברים: ' + error.message;
     }
 }
 
-// בדיקת סטטוס העבודה
+// חדש: משתנה גלובלי לשמירת מרווח הבדיקה
 let statusCheckInterval;
 
+// פונקציית בדיקת סטטוס
 function startStatusCheck(jobId) {
+    if (statusCheckInterval) {
+        clearInterval(statusCheckInterval);
+    }
+    
     // בדיקה כל 10 שניות
     statusCheckInterval = setInterval(() => checkDiarizationStatus(jobId), 10000);
+    
+    // הפסקת הבדיקה אחרי 30 דקות
+    setTimeout(() => {
+        if (statusCheckInterval) {
+            clearInterval(statusCheckInterval);
+            document.getElementById('segmentationResult').textContent += '\n\nהתהליך לוקח יותר מדי זמן. אנא נסה שוב.';
+        }
+    }, 30 * 60 * 1000);
 }
 
+// פונקציית בדיקת סטטוס יחידה
 async function checkDiarizationStatus(jobId) {
     try {
         const response = await fetch(`/.netlify/functions/check-status?jobId=${jobId}`);
@@ -966,28 +1004,19 @@ async function checkDiarizationStatus(jobId) {
             document.getElementById('segmentationResult').textContent = 
                 'שגיאה בעיבוד הקובץ: ' + (data.error || 'שגיאה לא ידועה');
         }
-        // אם הסטטוס הוא 'pending' נמשיך לבדוק
     } catch (error) {
         console.error('Error checking status:', error);
+        // לא מפסיקים את הבדיקה במקרה של שגיאה זמנית
     }
 }
 
-// הצגת התוצאות
+// פונקציית הצגת תוצאות
 function displayDiarizationResults(results) {
     const formattedResults = results.map(segment => {
         const startTime = formatTime(segment.start);
         const endTime = formatTime(segment.end);
-        return `[${startTime} - ${endTime}] ${segment.speaker}: ${segment.text || ''}`;
+        return `[${startTime} - ${endTime}] ${segment.speaker}${segment.text ? ': ' + segment.text : ''}`;
     }).join('\n\n');
 
     document.getElementById('segmentationResult').textContent = formattedResults;
-}
-
-// פונקציית עזר להמרת זמן
-function formatTime(seconds) {
-    const date = new Date(seconds * 1000);
-    const minutes = date.getUTCMinutes().toString().padStart(2, '0');
-    const secs = date.getUTCSeconds().toString().padStart(2, '0');
-    const millis = date.getUTCMilliseconds().toString().padStart(3, '0');
-    return `${minutes}:${secs}.${millis}`;
 }
