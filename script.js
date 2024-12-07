@@ -893,15 +893,13 @@ function restartProcess() {
 
 async function startDiarization() {
     try {
-        // הצגת מודאל טעינה
-        document.getElementById('segmentationResult').textContent = 'מעבד את הקובץ...';
+        document.getElementById('segmentationResult').textContent = 'מעבד את הקובץ... תהליך זה עשוי להימשך מספר דקות';
         openModal('speakerSegmentationModal');
 
-        // קריאה לפונקציית נטליפי
         const response = await fetch('/.netlify/functions/diarize', {
             method: 'POST',
             body: JSON.stringify({
-                audioData: audioBuffer, // המשתנה שמכיל את הקובץ
+                audioData: audioBuffer,
                 fileName: audioFileName
             })
         });
@@ -912,8 +910,9 @@ async function startDiarization() {
             throw new Error(data.error || 'שגיאה בתהליך זיהוי הדוברים');
         }
 
-        // עדכון ממשק המשתמש עם תוצאות הדיאריזציה
-        displayDiarizationResults(data);
+        // נציג למשתמש הודעה שהקובץ נשלח והתוצאות יגיעו בקרוב
+        document.getElementById('segmentationResult').textContent = 
+            'הקובץ נשלח בהצלחה לעיבוד. התוצאות יוצגו כאן כשהן יהיו מוכנות. תהליך זה עשוי להימשך מספר דקות.';
 
     } catch (error) {
         console.error('Error:', error);
@@ -921,6 +920,7 @@ async function startDiarization() {
             'אירעה שגיאה בתהליך זיהוי הדוברים: ' + error.message;
     }
 }
+
 
 function displayDiarizationResults(data) {
     const resultElement = document.getElementById('segmentationResult');
