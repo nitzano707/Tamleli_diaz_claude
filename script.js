@@ -891,6 +891,7 @@ function restartProcess() {
 
 
 
+// התחלת תהליך זיהוי הדוברים
 async function startDiarization() {
     try {
         const audioFile = document.getElementById('audioFile').files[0];
@@ -898,27 +899,21 @@ async function startDiarization() {
             throw new Error('לא נבחר קובץ אודיו');
         }
 
-        console.log('Starting diarization for file:', audioFile.name);
-        document.getElementById('segmentationResult').textContent = 'מתחיל תהליך... מעבד את הקובץ';
+        document.getElementById('segmentationResult').textContent = 'מעבד את הקובץ... התהליך עשוי להימשך מספר דקות';
         openModal('speakerSegmentationModal');
 
         // המרת הקובץ ל-base64
-        console.log('Converting file to base64...');
         const reader = new FileReader();
         const audioData = await new Promise((resolve, reject) => {
             reader.onload = () => {
                 const base64 = reader.result.split(',')[1];
-                console.log('File converted successfully');
                 resolve(base64);
             };
-            reader.onerror = (error) => {
-                console.error('File reading error:', error);
-                reject(error);
-            };
+            reader.onerror = reject;
             reader.readAsDataURL(audioFile);
         });
 
-        console.log('Sending request to serverless function...');
+        // שליחה לפונקציית Netlify
         const response = await fetch('/.netlify/functions/diarize', {
             method: 'POST',
             headers: {
@@ -930,49 +925,69 @@ async function startDiarization() {
             })
         });
 
-        // קריאת התשובה כטקסט קודם
-        const responseText = await response.text();
-        console.log('Raw server response:', responseText);
-
-        // ניסיון לפרסר את התשובה כ-JSON
-        let data;
-        try {
-            data = JSON.parse(responseText);
-        } catch (e) {
-            console.error('Failed to parse server response as JSON:', e);
-            throw new Error('תשובה לא תקינה מהשרת');
-        }
-
+        const data = await response.json();
+        
         if (!response.ok) {
-            throw new Error(`שגיאת שרת: ${data.error || 'שגיאה לא ידועה'}`);
+            throw new Error(data.error || 'שגיאה בתהליך זיהוי הדוברים');
         }
 
-        // עדכון המשתמש
         document.getElementById('segmentationResult').textContent = 
-            'בקשה נשלחה בהצלחה. ממתין לתוצאות...\n' +
-            'מזהה עבודה: ' + (data.jobId || 'לא התקבל') + '\n' +
-            'סטטוס: ' + (data.status || 'לא ידוע');
+            'הקובץ נשלח בהצלחה לעיבוד. התוצאות יוצגו כאן כשהן יהיו מוכנות.\n' +
+            'מזהה עבודה: ' + data.jobId;
+
+        // התחלת בדיקת סטטוס תקופתית
+        startStatusCheck(data.jobId);
 
     } catch (error) {
-        console.error('Diarization error:', error);
+        console.error('Error:', error);
         document.getElementById('segmentationResult').textContent = 
             'אירעה שגיאה בתהליך זיהוי הדוברים: ' + error.message;
     }
 }
 
+// בדיקת סטטוס העבודה
+let statusCheckInterval;
 
+function startStatusCheck(jobId) {
+    // בדיקה כל 10 שניות
+    statusCheckInterval = setInterval(() => checkDiarizationStatus(jobId), 10000);
+}
 
+async function checkDiarizationStatus(jobId) {
+    try {
+        const response = await fetch(`/.netlify/functions/check-status?jobId=${jobId}`);
+        const data = await response.json();
 
+        if (data.status === 'succeeded' && data.results) {
+            clearInterval(statusCheckInterval);
+            displayDiarizationResults(data.results);
+        } else if (data.status === 'failed') {
+            clearInterval(statusCheckInterval);
+            document.getElementById('segmentationResult').textContent = 
+                'שגיאה בעיבוד הקובץ: ' + (data.error || 'שגיאה לא ידועה');
+        }
+        // אם הסטטוס הוא 'pending' נמשיך לבדוק
+    } catch (error) {
+        console.error('Error checking status:', error);
+    }
+}
 
-function displayDiarizationResults(data) {
-    const resultElement = document.getElementById('segmentationResult');
-    let formattedResults = '';
-
-    data.diarization.forEach((segment, index) => {
+// הצגת התוצאות
+function displayDiarizationResults(results) {
+    const formattedResults = results.map(segment => {
         const startTime = formatTime(segment.start);
         const endTime = formatTime(segment.end);
-        formattedResults += `[${startTime} - ${endTime}] דובר ${segment.speaker}\n${segment.text}\n\n`;
-    });
+        return `[${startTime} - ${endTime}] ${segment.speaker}: ${segment.text || ''}`;
+    }).join('\n\n');
 
-    resultElement.textContent = formattedResults;
+    document.getElementById('segmentationResult').textContent = formattedResults;
+}
+
+// פונקציית עזר להמרת זמן
+function formatTime(seconds) {
+    const date = new Date(seconds * 1000);
+    const minutes = date.getUTCMinutes().toString().padStart(2, '0');
+    const secs = date.getUTCSeconds().toString().padStart(2, '0');
+    const millis = date.getUTCMilliseconds().toString().padStart(3, '0');
+    return `${minutes}:${secs}.${millis}`;
 }
