@@ -4,59 +4,33 @@ const FormData = require('form-data');
 exports.handler = async (event, context) => {
     console.log('Function started');
   
-    if (event.httpMethod !== 'POST') {
-        console.log('Invalid method:', event.httpMethod);
-        return {
-            statusCode: 405,
-            body: JSON.stringify({ error: 'Method Not Allowed' })
-        };
-    }
-
     try {
         console.log('Parsing request body');
         const { audioData, fileName } = JSON.parse(event.body);
         console.log('File name:', fileName);
 
-        // בדיקה שה-API key קיים
         if (!process.env.PYANNOTE_API_KEY) {
             throw new Error('PYANNOTE_API_KEY not configured');
         }
 
-        // יצירת מזהה ייחודי לקובץ
-        const timestamp = Date.now();
-        const cleanFileName = fileName.replace(/[^a-zA-Z0-9]/g, '');
-        const mediaId = `object_${timestamp}_${cleanFileName}`;
-        const mediaUrl = `media://${mediaId}`;
-
-        console.log('Generated media URL:', mediaUrl);
-
-        // 1. יצירת media URL
-        console.log('Creating media URL request');
+        // 1. קבלת URL להעלאה
+        console.log('Requesting upload URL');
         const mediaResponse = await fetch('https://api.pyannote.ai/v1/media/input', {
             method: 'POST',
             headers: {
                 'Authorization': `Bearer ${process.env.PYANNOTE_API_KEY}`,
                 'Content-Type': 'application/json'
             },
-            body: JSON.stringify({ url: mediaUrl })
+            body: JSON.stringify({
+                url: `media://temp_${Date.now()}`  // שימוש במזהה זמני
+            })
         });
 
-        const mediaResponseText = await mediaResponse.text();
-        console.log('Media Response:', mediaResponseText);
+        console.log('Media Response Status:', mediaResponse.status);
+        const mediaData = await mediaResponse.json();
+        console.log('Got upload URL:', mediaData.url);
 
-        if (!mediaResponse.ok) {
-            throw new Error(`Media URL error: ${mediaResponseText}`);
-        }
-
-        let mediaData;
-        try {
-            mediaData = JSON.parse(mediaResponseText);
-        } catch (e) {
-            throw new Error(`Failed to parse media response: ${mediaResponseText}`);
-        }
-
-        // 2. העלאת הקובץ
-        console.log('Uploading audio file');
+        // 2. העלאת הקובץ ל-URL שקיבלנו
         const buffer = Buffer.from(audioData, 'base64');
         const formData = new FormData();
         formData.append('file', buffer, fileName);
@@ -67,12 +41,10 @@ exports.handler = async (event, context) => {
         });
 
         if (!uploadResponse.ok) {
-            const uploadError = await uploadResponse.text();
-            throw new Error(`Upload error: ${uploadError}`);
+            throw new Error(`Upload failed with status ${uploadResponse.status}`);
         }
 
-        // 3. יצירת משימת דיאריזציה
-        console.log('Starting diarization task');
+        // 3. יצירת משימת דיאריזציה עם ה-URL המקורי
         const diarizeResponse = await fetch('https://api.pyannote.ai/v1/diarize', {
             method: 'POST',
             headers: {
@@ -80,25 +52,13 @@ exports.handler = async (event, context) => {
                 'Content-Type': 'application/json'
             },
             body: JSON.stringify({
-                url: mediaUrl,
+                url: mediaData.url,  // שימוש ב-URL שקיבלנו מהשרת
                 webhook: process.env.WEBHOOK_URL
             })
         });
 
-        const diarizeResponseText = await diarizeResponse.text();
-        console.log('Diarize Response:', diarizeResponseText);
-
-        if (!diarizeResponse.ok) {
-            throw new Error(`Diarization error: ${diarizeResponseText}`);
-        }
-
-        let diarizeData;
-        try {
-            diarizeData = JSON.parse(diarizeResponseText);
-        } catch (e) {
-            throw new Error(`Failed to parse diarization response: ${diarizeResponseText}`);
-        }
-
+        const diarizeData = await diarizeResponse.json();
+        
         return {
             statusCode: 200,
             headers: {
@@ -116,8 +76,7 @@ exports.handler = async (event, context) => {
         return {
             statusCode: 500,
             body: JSON.stringify({ 
-                error: error.message,
-                stack: error.stack
+                error: error.message
             })
         };
     }
