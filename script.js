@@ -906,7 +906,6 @@ async function startDiarization() {
         const reader = new FileReader();
         const audioData = await new Promise((resolve, reject) => {
             reader.onload = () => {
-                // המרה ל-base64 והסרת ה-metadata
                 const base64 = reader.result.split(',')[1];
                 resolve(base64);
             };
@@ -914,8 +913,14 @@ async function startDiarization() {
             reader.readAsDataURL(audioFile);
         });
 
-        const response = await fetch('/.netlify/functions/diarize', {
+        // שימוש ב-URL מלא
+        const functionUrl = `https://tamlelidiaz.netlify.app/.netlify/functions/diarize`;
+        
+        const response = await fetch(functionUrl, {
             method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
             body: JSON.stringify({
                 audioData: audioData,
                 fileName: audioFile.name
