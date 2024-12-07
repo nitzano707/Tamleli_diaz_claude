@@ -7,30 +7,33 @@ exports.handler = async (event, context) => {
     try {
         console.log('Parsing request body');
         const { audioData, fileName } = JSON.parse(event.body);
-        console.log('File name:', fileName);
-
-        if (!process.env.PYANNOTE_API_KEY) {
-            throw new Error('PYANNOTE_API_KEY not configured');
-        }
-
-        // 1. קבלת URL להעלאה
-        console.log('Requesting upload URL');
-        const mediaResponse = await fetch('https://api.pyannote.ai/v1/media/input', {
+        
+        // 1. יצירת media URL פשוט
+        const mediaUrlRequest = {
             method: 'POST',
             headers: {
                 'Authorization': `Bearer ${process.env.PYANNOTE_API_KEY}`,
                 'Content-Type': 'application/json'
             },
             body: JSON.stringify({
-                url: `media://temp_${Date.now()}`  // שימוש במזהה זמני
+                url: 'media://nitzantry1'  // URL פשוט כמו בדוגמה
             })
-        });
+        };
 
-        console.log('Media Response Status:', mediaResponse.status);
+        console.log('Requesting media URL...');
+        const mediaResponse = await fetch('https://api.pyannote.ai/v1/media/input', mediaUrlRequest);
+
+        if (!mediaResponse.ok) {
+            const errorText = await mediaResponse.text();
+            console.error('Media URL error:', errorText);
+            throw new Error(errorText);
+        }
+
         const mediaData = await mediaResponse.json();
-        console.log('Got upload URL:', mediaData.url);
+        console.log('Media URL response:', mediaData);
 
-        // 2. העלאת הקובץ ל-URL שקיבלנו
+        // 2. העלאת הקובץ
+        console.log('Uploading file...');
         const buffer = Buffer.from(audioData, 'base64');
         const formData = new FormData();
         formData.append('file', buffer, fileName);
@@ -41,21 +44,29 @@ exports.handler = async (event, context) => {
         });
 
         if (!uploadResponse.ok) {
-            throw new Error(`Upload failed with status ${uploadResponse.status}`);
+            const errorText = await uploadResponse.text();
+            throw new Error(`Upload error: ${errorText}`);
         }
 
-        // 3. יצירת משימת דיאריזציה עם ה-URL המקורי
-        const diarizeResponse = await fetch('https://api.pyannote.ai/v1/diarize', {
+        // 3. יצירת משימת דיאריזציה
+        const diarizeRequest = {
             method: 'POST',
             headers: {
                 'Authorization': `Bearer ${process.env.PYANNOTE_API_KEY}`,
                 'Content-Type': 'application/json'
             },
             body: JSON.stringify({
-                url: mediaData.url,  // שימוש ב-URL שקיבלנו מהשרת
+                url: 'media://nitzantry1',  // שימוש באותו URL פשוט
                 webhook: process.env.WEBHOOK_URL
             })
-        });
+        };
+
+        const diarizeResponse = await fetch('https://api.pyannote.ai/v1/diarize', diarizeRequest);
+
+        if (!diarizeResponse.ok) {
+            const errorText = await diarizeResponse.text();
+            throw new Error(`Diarization error: ${errorText}`);
+        }
 
         const diarizeData = await diarizeResponse.json();
         
@@ -67,7 +78,8 @@ exports.handler = async (event, context) => {
             body: JSON.stringify({
                 status: 'success',
                 message: 'Diarization process started',
-                jobId: diarizeData.jobId
+                jobId: diarizeData.jobId,
+                uploadUrl: mediaData.url
             })
         };
 
@@ -76,7 +88,8 @@ exports.handler = async (event, context) => {
         return {
             statusCode: 500,
             body: JSON.stringify({ 
-                error: error.message
+                error: error.message,
+                details: error.stack
             })
         };
     }
