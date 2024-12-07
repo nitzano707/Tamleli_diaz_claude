@@ -893,7 +893,6 @@ function restartProcess() {
 
 async function startDiarization() {
     try {
-        // קבלת קובץ האודיו הנוכחי
         const audioFile = document.getElementById('audioFile').files[0];
         if (!audioFile) {
             throw new Error('לא נבחר קובץ אודיו');
@@ -913,9 +912,12 @@ async function startDiarization() {
             reader.readAsDataURL(audioFile);
         });
 
-        // שימוש ב-URL מלא
-        const functionUrl = `https://tamlelidiaz.netlify.app/.netlify/functions/diarize`;
+        // קביעת ה-URL המוחלט
+        const currentUrl = window.location.origin;
+        const functionUrl = `${currentUrl}/.netlify/functions/diarize`;
         
+        console.log('Calling function at:', functionUrl); // לוג לבדיקה
+
         const response = await fetch(functionUrl, {
             method: 'POST',
             headers: {
@@ -927,12 +929,14 @@ async function startDiarization() {
             })
         });
 
-        const data = await response.json();
-        
         if (!response.ok) {
-            throw new Error(data.error || 'שגיאה בתהליך זיהוי הדוברים');
+            const errorText = await response.text();
+            console.error('Server response:', errorText); // לוג לבדיקה
+            throw new Error(`Server error: ${response.status} - ${errorText}`);
         }
 
+        const data = await response.json();
+        
         document.getElementById('segmentationResult').textContent = 
             'הקובץ נשלח בהצלחה לעיבוד. התוצאות יוצגו כאן כשהן יהיו מוכנות. תהליך זה עשוי להימשך מספר דקות.';
 
@@ -942,6 +946,8 @@ async function startDiarization() {
             'אירעה שגיאה בתהליך זיהוי הדוברים: ' + error.message;
     }
 }
+
+
 
 
 
