@@ -1,6 +1,11 @@
 const fetch = require('node-fetch');
 const FormData = require('form-data');
 
+// הגדרת קבועים
+const MAX_FILE_SIZE = 25 * 1024 * 1024; // 25MB
+const PYANNOTE_API_URL = 'https://api.pyannote.ai/v1';
+const MEDIA_ID = 'tamlelitest1'; // מזהה קבוע לכל הבקשות
+
 exports.handler = async (event, context) => {
     console.log('Diarization function started');
 
@@ -12,47 +17,65 @@ exports.handler = async (event, context) => {
     }
 
     try {
-        // חילוץ המידע מהבקשה
-        const { audioData, fileName } = JSON.parse(event.body);
-        console.log('Processing file:', fileName);
-
-        // בדיקת API key
-        if (!process.env.PYANNOTE_API_KEY) {
-            throw new Error('PYANNOTE_API_KEY not configured');
+        // קבלת המידע מהבקשה
+        let requestData;
+        try {
+            requestData = JSON.parse(event.body);
+        } catch (error) {
+            console.error('Error parsing request body:', error);
+            throw new Error('Invalid JSON in request body');
         }
 
-        // בדיקת webhook URL
-        if (!process.env.WEBHOOK_URL) {
-            throw new Error('WEBHOOK_URL not configured');
+        const { audioData, fileName, fileSize } = requestData;
+        console.log('Processing file:', fileName, 'Size:', fileSize, 'bytes');
+
+        // בדיקות תקינות
+        if (!audioData) throw new Error('No audio data provided');
+        if (!fileName) throw new Error('No file name provided');
+        if (fileSize > MAX_FILE_SIZE) {
+            throw new Error(`File too large. Maximum size is ${MAX_FILE_SIZE / (1024 * 1024)}MB`);
         }
 
-        // 1. קבלת URL להעלאה
+        // בדיקת הגדרות
+        if (!process.env.PYANNOTE_API_KEY) throw new Error('PYANNOTE_API_KEY not configured');
+        if (!process.env.WEBHOOK_URL) throw new Error('WEBHOOK_URL not configured');
+
+        // 1. יצירת URL להעלאה
         console.log('Requesting upload URL from PyannoteAI');
-        const mediaResponse = await fetch('https://api.pyannote.ai/v1/media/input', {
+        const mediaResponse = await fetch(`${PYANNOTE_API_URL}/media/input`, {
             method: 'POST',
             headers: {
                 'Authorization': `Bearer ${process.env.PYANNOTE_API_KEY}`,
                 'Content-Type': 'application/json'
             },
             body: JSON.stringify({
-                url: 'media://nitzantry1'
+                url: `media://${MEDIA_ID}`
             })
         });
 
         if (!mediaResponse.ok) {
             const errorText = await mediaResponse.text();
-            console.error('Media URL error:', errorText);
-            throw new Error(`PyannoteAI media error: ${errorText}`);
+            console.error('Media URL error response:', errorText);
+            throw new Error(`Failed to get upload URL: ${errorText}`);
         }
 
         const mediaData = await mediaResponse.json();
-        console.log('Received upload URL:', mediaData.url);
+        console.log('Received upload URL successfully');
 
         // 2. העלאת הקובץ
-        console.log('Uploading audio file');
-        const buffer = Buffer.from(audioData, 'base64');
+        console.log('Starting file upload');
+        let buffer;
+        try {
+            buffer = Buffer.from(audioData, 'base64');
+        } catch (error) {
+            throw new Error('Failed to decode audio data: ' + error.message);
+        }
+
         const formData = new FormData();
-        formData.append('file', buffer, fileName);
+        formData.append('file', buffer, {
+            filename: fileName,
+            contentType: 'audio/mpeg'
+        });
 
         const uploadResponse = await fetch(mediaData.url, {
             method: 'PUT',
@@ -61,34 +84,34 @@ exports.handler = async (event, context) => {
 
         if (!uploadResponse.ok) {
             const uploadError = await uploadResponse.text();
-            console.error('Upload error:', uploadError);
-            throw new Error(`Upload error: ${uploadError}`);
+            console.error('Upload error response:', uploadError);
+            throw new Error(`Upload failed: ${uploadError}`);
         }
 
         console.log('File uploaded successfully');
 
         // 3. יצירת משימת דיאריזציה
-        console.log('Starting diarization task');
-        const diarizeResponse = await fetch('https://api.pyannote.ai/v1/diarize', {
+        console.log('Initiating diarization task');
+        const diarizeResponse = await fetch(`${PYANNOTE_API_URL}/diarize`, {
             method: 'POST',
             headers: {
                 'Authorization': `Bearer ${process.env.PYANNOTE_API_KEY}`,
                 'Content-Type': 'application/json'
             },
             body: JSON.stringify({
-                url: 'media://nitzantry1',
+                url: `media://${MEDIA_ID}`,
                 webhook: process.env.WEBHOOK_URL
             })
         });
 
         if (!diarizeResponse.ok) {
             const diarizeError = await diarizeResponse.text();
-            console.error('Diarization error:', diarizeError);
-            throw new Error(`Diarization error: ${diarizeError}`);
+            console.error('Diarization error response:', diarizeError);
+            throw new Error(`Diarization request failed: ${diarizeError}`);
         }
 
         const diarizeData = await diarizeResponse.json();
-        console.log('Diarization job created:', diarizeData);
+        console.log('Diarization job created successfully:', diarizeData.jobId);
 
         return {
             statusCode: 200,
@@ -109,7 +132,7 @@ exports.handler = async (event, context) => {
             statusCode: 500,
             body: JSON.stringify({ 
                 error: error.message,
-                stack: error.stack
+                details: error.stack
             })
         };
     }
